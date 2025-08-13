@@ -297,11 +297,11 @@ export async function PUT(request) {
       // Verify ownership
       const { data: shop } = await supabase
         .from('barber_shops')
-        .select('user_id')
+        .select('userId')
         .eq('id', shopId)
         .single()
 
-      if (!shop || shop.user_id !== user.id) {
+      if (!shop || shop.userId !== user.id) {
         return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 403 }))
       }
 
@@ -309,7 +309,7 @@ export async function PUT(request) {
         .from('barber_shops')
         .update({
           ...body,
-          updated_at: new Date().toISOString()
+          updatedAt: new Date().toISOString()
         })
         .eq('id', shopId)
         .select()
