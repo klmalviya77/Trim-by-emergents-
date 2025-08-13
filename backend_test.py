@@ -165,7 +165,7 @@ class TrimTimeAPITester:
 
     def test_authentication_flow(self):
         """Test complete authentication flow"""
-        test_email = f"auth_test_{uuid.uuid4().hex[:8]}@trimtime.test"
+        test_email = f"auth.test.{uuid.uuid4().hex[:8]}@gmail.com"
         test_password = "TestPassword123!"
         
         try:
