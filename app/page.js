@@ -70,6 +70,14 @@ export default function TrimTime() {
     
     try {
       if (isSignUp) {
+        const signupData = {
+          email,
+          password,
+          role: selectedRole,
+          name,
+          additionalData: selectedRole === 'barber' ? additionalData : undefined
+        }
+        
         const { data, error: signUpError } = await supabase.auth.signUp({
           email,
           password,
@@ -77,50 +85,34 @@ export default function TrimTime() {
         
         if (signUpError) throw signUpError
         
-        // Insert user data into our users table
+        // If signup successful, create user profile via API
         if (data.user) {
-          const { error: insertError } = await supabase
-            .from('users')
-            .insert([{
-              id: data.user.id,
-              email: email,
-              name: name,
-              role: selectedRole,
-              createdAt: new Date().toISOString()
-            }])
-          
-          if (insertError) {
-            console.error('Error inserting user data:', insertError)
-            throw insertError
-          }
-          
-          // If barber, also insert into barber_shops table
-          if (selectedRole === 'barber') {
-            const { error: barberError } = await supabase
-              .from('barber_shops')
-              .insert([{
-                id: `shop_${data.user.id}`,
-                userId: data.user.id,
-                shopName: additionalData.shopName || '',
-                category: additionalData.category || '',
-                areaName: additionalData.areaName || '',
-                locationLink: additionalData.locationLink || '',
-                services: [],
-                ratingAvg: 0,
-                totalReviews: 0,
-                bookingsCount: 0,
-                verify: false,
-                createdAt: new Date().toISOString()
-              }])
+          try {
+            const response = await fetch('/api/users/profile', {
+              method: 'POST',
+              headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${data.session?.access_token || ''}`
+              },
+              body: JSON.stringify({
+                name,
+                role: selectedRole,
+                additionalData: selectedRole === 'barber' ? additionalData : undefined
+              })
+            })
             
-            if (barberError) {
-              console.error('Error inserting barber shop data:', barberError)
-              throw barberError
+            if (!response.ok) {
+              const errorData = await response.json()
+              console.error('Profile creation error:', errorData)
+              // Don't throw error, just log it - user can still proceed
             }
+          } catch (profileError) {
+            console.error('Profile creation failed:', profileError)
+            // Don't throw error, just log it
           }
         }
         
-        alert('Registration successful! Please check your email to verify your account.')
+        alert('Registration successful! Please check your email to verify your account before signing in.')
       } else {
         const { data, error: signInError } = await supabase.auth.signInWithPassword({
           email,
@@ -136,7 +128,14 @@ export default function TrimTime() {
           .eq('id', data.user.id)
           .single()
         
-        if (roleError) throw roleError
+        if (roleError) {
+          // User might not have profile yet, create it
+          if (roleError.code === 'PGRST116') { // No rows returned
+            setError('User profile not found. Please contact support or try registering again.')
+            return
+          }
+          throw roleError
+        }
         
         if (userData.role === 'customer') {
           setCurrentPage('customerDashboard')
@@ -145,7 +144,7 @@ export default function TrimTime() {
           const { data: barberData, error: verifyError } = await supabase
             .from('barber_shops')
             .select('verify')
-            .eq('user_id', data.user.id)
+            .eq('userId', data.user.id)
             .single()
           
           if (verifyError || !barberData.verify) {
