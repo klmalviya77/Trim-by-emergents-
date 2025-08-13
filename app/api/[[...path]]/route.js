@@ -122,14 +122,131 @@ export async function POST(request) {
 
     // Authentication endpoints
     if (path === 'auth/signup') {
-      const { email, password } = body
-      const { data, error } = await supabase.auth.signUp({ email, password })
+      const { email, password, role, name, additionalData } = body
       
-      if (error) {
-        return handleCORS(NextResponse.json({ error: error.message }, { status: 400 }))
+      try {
+        // Step 1: Create user in Supabase Auth
+        const { data, error } = await supabase.auth.signUp({ email, password })
+        
+        if (error) {
+          return handleCORS(NextResponse.json({ error: error.message }, { status: 400 }))
+        }
+        
+        // Step 2: If user creation successful, create profile in users table
+        if (data.user && role && name) {
+          const { error: profileError } = await supabase
+            .from('users')
+            .insert([{
+              id: data.user.id,
+              email: email,
+              name: name,
+              role: role,
+              createdAt: new Date().toISOString()
+            }])
+          
+          if (profileError) {
+            console.error('Error creating user profile:', profileError)
+            // Don't fail the signup, just log the error
+          }
+          
+          // Step 3: If barber, create barber shop record
+          if (role === 'barber' && additionalData) {
+            const { error: shopError } = await supabase
+              .from('barber_shops')
+              .insert([{
+                id: `shop_${data.user.id}`,
+                userId: data.user.id,
+                shopName: additionalData.shopName || '',
+                category: additionalData.category || '',
+                areaName: additionalData.areaName || '',
+                locationLink: additionalData.locationLink || '',
+                services: [],
+                ratingAvg: 0,
+                totalReviews: 0,
+                bookingsCount: 0,
+                verify: false,
+                createdAt: new Date().toISOString()
+              }])
+            
+            if (shopError) {
+              console.error('Error creating barber shop:', shopError)
+              // Don't fail the signup, just log the error
+            }
+          }
+        }
+        
+        return handleCORS(NextResponse.json({ user: data.user, needsEmailConfirmation: !data.session }))
+      } catch (err) {
+        return handleCORS(NextResponse.json({ error: err.message }, { status: 500 }))
       }
-      
-      return handleCORS(NextResponse.json({ user: data.user }))
+    }
+
+    // Create user profile (for existing auth users)
+    if (path === 'users/profile') {
+      const { data: { user }, error: authError } = await supabase.auth.getUser()
+      if (!user) {
+        return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+      }
+
+      const { name, role, additionalData } = body
+
+      try {
+        // Check if profile already exists
+        const { data: existingProfile } = await supabase
+          .from('users')
+          .select('id')
+          .eq('id', user.id)
+          .single()
+
+        if (existingProfile) {
+          return handleCORS(NextResponse.json({ error: 'Profile already exists' }, { status: 400 }))
+        }
+
+        // Create user profile
+        const { data: profileData, error: profileError } = await supabase
+          .from('users')
+          .insert([{
+            id: user.id,
+            email: user.email,
+            name: name,
+            role: role,
+            createdAt: new Date().toISOString()
+          }])
+          .select()
+          .single()
+
+        if (profileError) {
+          return handleCORS(NextResponse.json({ error: profileError.message }, { status: 500 }))
+        }
+
+        // If barber, create barber shop record
+        if (role === 'barber' && additionalData) {
+          const { error: shopError } = await supabase
+            .from('barber_shops')
+            .insert([{
+              id: `shop_${user.id}`,
+              userId: user.id,
+              shopName: additionalData.shopName || '',
+              category: additionalData.category || '',
+              areaName: additionalData.areaName || '',
+              locationLink: additionalData.locationLink || '',
+              services: [],
+              ratingAvg: 0,
+              totalReviews: 0,
+              bookingsCount: 0,
+              verify: false,
+              createdAt: new Date().toISOString()
+            }])
+
+          if (shopError) {
+            return handleCORS(NextResponse.json({ error: shopError.message }, { status: 500 }))
+          }
+        }
+
+        return handleCORS(NextResponse.json({ profile: profileData }))
+      } catch (err) {
+        return handleCORS(NextResponse.json({ error: err.message }, { status: 500 }))
+      }
     }
 
     if (path === 'auth/signin') {
