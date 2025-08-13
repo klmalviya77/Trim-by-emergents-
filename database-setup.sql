@@ -2,7 +2,7 @@
 -- Run this SQL in your Supabase SQL Editor
 
 -- Create users table (extends Supabase auth)
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email TEXT NOT NULL,
   name TEXT NOT NULL,
@@ -12,7 +12,7 @@ CREATE TABLE users (
 );
 
 -- Create barber_shops table
-CREATE TABLE barber_shops (
+CREATE TABLE IF NOT EXISTS barber_shops (
   id TEXT PRIMARY KEY,
   "userId" UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   "shopName" TEXT NOT NULL,
@@ -29,7 +29,7 @@ CREATE TABLE barber_shops (
 );
 
 -- Create bookings table
-CREATE TABLE bookings (
+CREATE TABLE IF NOT EXISTS bookings (
   id TEXT PRIMARY KEY,
   "userId" UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   "shopId" TEXT NOT NULL REFERENCES barber_shops(id) ON DELETE CASCADE,
@@ -40,7 +40,7 @@ CREATE TABLE bookings (
 );
 
 -- Create reviews table
-CREATE TABLE reviews (
+CREATE TABLE IF NOT EXISTS reviews (
   id TEXT PRIMARY KEY,
   "shopId" TEXT NOT NULL REFERENCES barber_shops(id) ON DELETE CASCADE,
   "userId" UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -51,7 +51,7 @@ CREATE TABLE reviews (
 );
 
 -- Create queue table (for real-time position tracking)
-CREATE TABLE queue (
+CREATE TABLE IF NOT EXISTS queue (
   id TEXT PRIMARY KEY,
   "shopId" TEXT NOT NULL REFERENCES barber_shops(id) ON DELETE CASCADE,
   "userId" UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -68,15 +68,40 @@ ALTER TABLE bookings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE queue ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they exist
+DROP POLICY IF EXISTS "Users can read their own data" ON users;
+DROP POLICY IF EXISTS "Users can update their own data" ON users;
+DROP POLICY IF EXISTS "Allow user registration" ON users;
+
+DROP POLICY IF EXISTS "Anyone can read verified shops" ON barber_shops;
+DROP POLICY IF EXISTS "Barbers can read their own shops" ON barber_shops;
+DROP POLICY IF EXISTS "Allow barber shop creation" ON barber_shops;
+DROP POLICY IF EXISTS "Barbers can update their own shops" ON barber_shops;
+
+DROP POLICY IF EXISTS "Users can read their own bookings" ON bookings;
+DROP POLICY IF EXISTS "Barbers can read bookings for their shops" ON bookings;
+DROP POLICY IF EXISTS "Users can create bookings" ON bookings;
+DROP POLICY IF EXISTS "Users can update their own bookings" ON bookings;
+DROP POLICY IF EXISTS "Barbers can update bookings for their shops" ON bookings;
+
+DROP POLICY IF EXISTS "Anyone can read reviews" ON reviews;
+DROP POLICY IF EXISTS "Users can create reviews" ON reviews;
+DROP POLICY IF EXISTS "Users can update their own reviews" ON reviews;
+
+DROP POLICY IF EXISTS "Users can read their own queue position" ON queue;
+DROP POLICY IF EXISTS "Barbers can read queue for their shops" ON queue;
+DROP POLICY IF EXISTS "Users can join queue" ON queue;
+DROP POLICY IF EXISTS "Barbers can update queue for their shops" ON queue;
+
 -- Create RLS Policies
 
 -- Users table policies
 CREATE POLICY "Users can read their own data" ON users FOR SELECT USING (auth.uid() = id);
 CREATE POLICY "Users can update their own data" ON users FOR UPDATE USING (auth.uid() = id);
-CREATE POLICY "Allow user registration" ON users FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow user registration" ON users FOR INSERT WITH CHECK (auth.uid() = id);
 
--- Barber shops policies
-CREATE POLICY "Anyone can read verified shops" ON barber_shops FOR SELECT USING (verify = true);
+-- Barber shops policies (FIXED)
+CREATE POLICY "Anyone can read verified shops" ON barber_shops FOR SELECT USING (verify = true OR auth.uid() = "userId");
 CREATE POLICY "Barbers can read their own shops" ON barber_shops FOR SELECT USING (auth.uid() = "userId");
 CREATE POLICY "Allow barber shop creation" ON barber_shops FOR INSERT WITH CHECK (auth.uid() = "userId");
 CREATE POLICY "Barbers can update their own shops" ON barber_shops FOR UPDATE USING (auth.uid() = "userId");
@@ -86,7 +111,7 @@ CREATE POLICY "Users can read their own bookings" ON bookings FOR SELECT USING (
 CREATE POLICY "Barbers can read bookings for their shops" ON bookings FOR SELECT USING (
   EXISTS (
     SELECT 1 FROM barber_shops 
-    WHERE id = "shopId" AND "userId" = auth.uid()
+    WHERE id = bookings."shopId" AND "userId" = auth.uid()
   )
 );
 CREATE POLICY "Users can create bookings" ON bookings FOR INSERT WITH CHECK (auth.uid() = "userId");
@@ -94,7 +119,7 @@ CREATE POLICY "Users can update their own bookings" ON bookings FOR UPDATE USING
 CREATE POLICY "Barbers can update bookings for their shops" ON bookings FOR UPDATE USING (
   EXISTS (
     SELECT 1 FROM barber_shops 
-    WHERE id = "shopId" AND "userId" = auth.uid()
+    WHERE id = bookings."shopId" AND "userId" = auth.uid()
   )
 );
 
@@ -108,41 +133,96 @@ CREATE POLICY "Users can read their own queue position" ON queue FOR SELECT USIN
 CREATE POLICY "Barbers can read queue for their shops" ON queue FOR SELECT USING (
   EXISTS (
     SELECT 1 FROM barber_shops 
-    WHERE id = "shopId" AND "userId" = auth.uid()
+    WHERE id = queue."shopId" AND "userId" = auth.uid()
   )
 );
 CREATE POLICY "Users can join queue" ON queue FOR INSERT WITH CHECK (auth.uid() = "userId");
 CREATE POLICY "Barbers can update queue for their shops" ON queue FOR UPDATE USING (
   EXISTS (
     SELECT 1 FROM barber_shops 
-    WHERE id = "shopId" AND "userId" = auth.uid()
+    WHERE id = queue."shopId" AND "userId" = auth.uid()
   )
 );
 
--- Create indexes for performance
-CREATE INDEX idx_users_role ON users(role);
-CREATE INDEX idx_users_created ON users("createdAt" DESC);
-
-CREATE INDEX idx_shops_verify ON barber_shops(verify);
-CREATE INDEX idx_shops_area ON barber_shops("areaName");
-CREATE INDEX idx_shops_category ON barber_shops(category);
-CREATE INDEX idx_shops_rating ON barber_shops("ratingAvg" DESC);
-CREATE INDEX idx_shops_created ON barber_shops("createdAt" DESC);
-
-CREATE INDEX idx_bookings_user ON bookings("userId");
-CREATE INDEX idx_bookings_shop ON bookings("shopId");
-CREATE INDEX idx_bookings_status ON bookings(status);
-CREATE INDEX idx_bookings_joined ON bookings("joinedAt" DESC);
-
-CREATE INDEX idx_reviews_shop ON reviews("shopId");
-CREATE INDEX idx_reviews_user ON reviews("userId");
-CREATE INDEX idx_reviews_rating ON reviews(rating);
-CREATE INDEX idx_reviews_created ON reviews("createdAt" DESC);
-
-CREATE INDEX idx_queue_shop ON queue("shopId");
-CREATE INDEX idx_queue_user ON queue("userId");
-CREATE INDEX idx_queue_position ON queue("shopId", position);
-CREATE INDEX idx_queue_status ON queue(status);
+-- Create indexes for performance (IF NOT EXISTS not supported, so use DO block)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_users_role' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_users_role ON users(role);
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_users_created' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_users_created ON users("createdAt" DESC);
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_shops_verify' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_shops_verify ON barber_shops(verify);
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_shops_area' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_shops_area ON barber_shops("areaName");
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_shops_category' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_shops_category ON barber_shops(category);
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_shops_rating' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_shops_rating ON barber_shops("ratingAvg" DESC);
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_shops_created' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_shops_created ON barber_shops("createdAt" DESC);
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_bookings_user' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_bookings_user ON bookings("userId");
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_bookings_shop' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_bookings_shop ON bookings("shopId");
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_bookings_status' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_bookings_status ON bookings(status);
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_bookings_joined' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_bookings_joined ON bookings("joinedAt" DESC);
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_reviews_shop' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_reviews_shop ON reviews("shopId");
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_reviews_user' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_reviews_user ON reviews("userId");
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_reviews_rating' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_reviews_rating ON reviews(rating);
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_reviews_created' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_reviews_created ON reviews("createdAt" DESC);
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_queue_shop' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_queue_shop ON queue("shopId");
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_queue_user' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_queue_user ON queue("userId");
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_queue_position' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_queue_position ON queue("shopId", position);
+  END IF;
+  
+  IF NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = 'idx_queue_status' AND n.nspname = 'public') THEN
+    CREATE INDEX idx_queue_status ON queue(status);
+  END IF;
+END $$;
 
 -- Auto-update timestamp trigger function
 CREATE OR REPLACE FUNCTION update_timestamp()
@@ -153,24 +233,33 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Create triggers for auto-updating timestamps
-DROP TRIGGER IF EXISTS update_users_timestamp ON users;
-CREATE TRIGGER update_users_timestamp
-  BEFORE UPDATE ON users
-  FOR EACH ROW
-  EXECUTE FUNCTION update_timestamp();
-
-DROP TRIGGER IF EXISTS update_shops_timestamp ON barber_shops;
-CREATE TRIGGER update_shops_timestamp
-  BEFORE UPDATE ON barber_shops
-  FOR EACH ROW
-  EXECUTE FUNCTION update_timestamp();
-
-DROP TRIGGER IF EXISTS update_bookings_timestamp ON bookings;
-CREATE TRIGGER update_bookings_timestamp
-  BEFORE UPDATE ON bookings
-  FOR EACH ROW
-  EXECUTE FUNCTION update_timestamp();
+-- Create triggers for auto-updating timestamps (with proper IF NOT EXISTS handling)
+DO $$
+BEGIN
+  -- Users table trigger
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_users_timestamp') THEN
+    CREATE TRIGGER update_users_timestamp
+      BEFORE UPDATE ON users
+      FOR EACH ROW
+      EXECUTE FUNCTION update_timestamp();
+  END IF;
+  
+  -- Barber shops table trigger
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_shops_timestamp') THEN
+    CREATE TRIGGER update_shops_timestamp
+      BEFORE UPDATE ON barber_shops
+      FOR EACH ROW
+      EXECUTE FUNCTION update_timestamp();
+  END IF;
+  
+  -- Bookings table trigger
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'update_bookings_timestamp') THEN
+    CREATE TRIGGER update_bookings_timestamp
+      BEFORE UPDATE ON bookings
+      FOR EACH ROW
+      EXECUTE FUNCTION update_timestamp();
+  END IF;
+END $$;
 
 -- Function to calculate queue position
 CREATE OR REPLACE FUNCTION get_queue_position(shop_id TEXT, user_id UUID)
@@ -209,13 +298,16 @@ $$ LANGUAGE plpgsql;
 /*
 -- Sample verified barber shop
 INSERT INTO users (id, email, name, role) VALUES 
-  ('550e8400-e29b-41d4-a716-446655440000', 'barber@example.com', 'John Barber', 'barber');
+  ('550e8400-e29b-41d4-a716-446655440000', 'barber@example.com', 'John Barber', 'barber')
+ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO barber_shops (id, "userId", "shopName", category, "areaName", "locationLink", services, verify) VALUES 
   ('shop_sample_1', '550e8400-e29b-41d4-a716-446655440000', 'Modern Cuts', 'Modern Salon', 'Downtown', 'https://maps.google.com/sample', 
-   '[{"name": "Haircut", "price": 25}, {"name": "Beard Trim", "price": 15}]'::jsonb, true);
+   '[{"name": "Haircut", "price": 25}, {"name": "Beard Trim", "price": 15}]'::jsonb, true)
+ON CONFLICT (id) DO NOTHING;
 
 -- Sample customer
 INSERT INTO users (id, email, name, role) VALUES 
-  ('550e8400-e29b-41d4-a716-446655440001', 'customer@example.com', 'Jane Customer', 'customer');
+  ('550e8400-e29b-41d4-a716-446655440001', 'customer@example.com', 'Jane Customer', 'customer')
+ON CONFLICT (id) DO NOTHING;
 */
