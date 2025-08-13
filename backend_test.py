@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 
 # Configuration
-BASE_URL = "https://5138bd8c-0bfd-43b3-82a4-10a7da8a8ac2.preview.emergentagent.com/api"
+BASE_URL = "http://localhost:3000/api"
 SUPABASE_URL = "https://wdpwhvbkbmyrwcqwdlrb.supabase.co"
 
 class TrimTimeAPITester:
