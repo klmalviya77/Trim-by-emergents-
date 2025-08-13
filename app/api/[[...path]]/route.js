@@ -1,104 +1,379 @@
-import { MongoClient } from 'mongodb'
-import { v4 as uuidv4 } from 'uuid'
 import { NextResponse } from 'next/server'
+import { createSupabaseServer } from '@/lib/supabase-server.js'
 
-// MongoDB connection
-let client
-let db
-
-async function connectToMongo() {
-  if (!client) {
-    client = new MongoClient(process.env.MONGO_URL)
-    await client.connect()
-    db = client.db(process.env.DB_NAME)
-  }
-  return db
-}
-
-// Helper function to handle CORS
+// CORS handling
 function handleCORS(response) {
-  response.headers.set('Access-Control-Allow-Origin', process.env.CORS_ORIGINS || '*')
+  response.headers.set('Access-Control-Allow-Origin', '*')
   response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
   response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-  response.headers.set('Access-Control-Allow-Credentials', 'true')
   return response
 }
 
-// OPTIONS handler for CORS
 export async function OPTIONS() {
   return handleCORS(new NextResponse(null, { status: 200 }))
 }
 
-// Route handler function
-async function handleRoute(request, { params }) {
-  const { path = [] } = params
-  const route = `/${path.join('/')}`
-  const method = request.method
-
+export async function GET(request) {
   try {
-    const db = await connectToMongo()
+    const supabase = createSupabaseServer()
+    const { pathname } = new URL(request.url)
+    const path = pathname.replace('/api/', '')
 
-    // Root endpoint - GET /api/root (since /api/ is not accessible with catch-all)
-    if (route === '/root' && method === 'GET') {
-      return handleCORS(NextResponse.json({ message: "Hello World" }))
-    }
-    // Root endpoint - GET /api/root (since /api/ is not accessible with catch-all)
-    if (route === '/' && method === 'GET') {
-      return handleCORS(NextResponse.json({ message: "Hello World" }))
+    // Health check endpoint
+    if (path === 'health') {
+      return handleCORS(NextResponse.json({ 
+        status: 'ok',
+        message: 'TrimTime API is running',
+        timestamp: new Date().toISOString()
+      }))
     }
 
-    // Status endpoints - POST /api/status
-    if (route === '/status' && method === 'POST') {
-      const body = await request.json()
-      
-      if (!body.client_name) {
-        return handleCORS(NextResponse.json(
-          { error: "client_name is required" }, 
-          { status: 400 }
-        ))
+    // Get current user
+    if (path === 'auth/user') {
+      const { data: { user }, error } = await supabase.auth.getUser()
+      if (error) {
+        return handleCORS(NextResponse.json({ error: error.message }, { status: 401 }))
+      }
+      return handleCORS(NextResponse.json({ user }))
+    }
+
+    // Get barber shops (for customers)
+    if (path === 'shops') {
+      const { data, error } = await supabase
+        .from('barber_shops')
+        .select('*')
+        .eq('verify', true)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        return handleCORS(NextResponse.json({ error: error.message }, { status: 500 }))
       }
 
-      const statusObj = {
-        id: uuidv4(),
-        client_name: body.client_name,
-        timestamp: new Date()
+      return handleCORS(NextResponse.json({ shops: data || [] }))
+    }
+
+    // Get bookings for a user
+    if (path === 'bookings') {
+      const { data: { user }, error: authError } = await supabase.auth.getUser()
+      if (!user) {
+        return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
       }
 
-      await db.collection('status_checks').insertOne(statusObj)
-      return handleCORS(NextResponse.json(statusObj))
+      const { data, error } = await supabase
+        .from('bookings')
+        .select(`
+          *,
+          barber_shops (
+            shop_name,
+            area_name
+          )
+        `)
+        .eq('user_id', user.id)
+        .order('joined_at', { ascending: false })
+
+      if (error) {
+        return handleCORS(NextResponse.json({ error: error.message }, { status: 500 }))
+      }
+
+      return handleCORS(NextResponse.json({ bookings: data || [] }))
     }
 
-    // Status endpoints - GET /api/status
-    if (route === '/status' && method === 'GET') {
-      const statusChecks = await db.collection('status_checks')
-        .find({})
-        .limit(1000)
-        .toArray()
-
-      // Remove MongoDB's _id field from response
-      const cleanedStatusChecks = statusChecks.map(({ _id, ...rest }) => rest)
+    // Get queue for a specific shop
+    if (path.startsWith('queue/')) {
+      const shopId = path.split('/')[1]
       
-      return handleCORS(NextResponse.json(cleanedStatusChecks))
+      const { data, error } = await supabase
+        .from('bookings')
+        .select(`
+          *,
+          users (
+            name,
+            email
+          )
+        `)
+        .eq('shop_id', shopId)
+        .eq('status', 'waiting')
+        .order('joined_at', { ascending: true })
+
+      if (error) {
+        return handleCORS(NextResponse.json({ error: error.message }, { status: 500 }))
+      }
+
+      return handleCORS(NextResponse.json({ queue: data || [] }))
     }
 
-    // Route not found
-    return handleCORS(NextResponse.json(
-      { error: `Route ${route} not found` }, 
-      { status: 404 }
-    ))
+    return handleCORS(NextResponse.json({ error: 'Endpoint not found' }, { status: 404 }))
 
   } catch (error) {
     console.error('API Error:', error)
-    return handleCORS(NextResponse.json(
-      { error: "Internal server error" }, 
-      { status: 500 }
-    ))
+    return handleCORS(NextResponse.json({ 
+      error: 'Internal server error',
+      details: error.message 
+    }, { status: 500 }))
   }
 }
 
-// Export all HTTP methods
-export const GET = handleRoute
-export const POST = handleRoute
-export const PUT = handleRoute
-export const DELETE = handleRoute
-export const PATCH = handleRoute
+export async function POST(request) {
+  try {
+    const supabase = createSupabaseServer()
+    const { pathname } = new URL(request.url)
+    const path = pathname.replace('/api/', '')
+    const body = await request.json()
+
+    // Authentication endpoints
+    if (path === 'auth/signup') {
+      const { email, password } = body
+      const { data, error } = await supabase.auth.signUp({ email, password })
+      
+      if (error) {
+        return handleCORS(NextResponse.json({ error: error.message }, { status: 400 }))
+      }
+      
+      return handleCORS(NextResponse.json({ user: data.user }))
+    }
+
+    if (path === 'auth/signin') {
+      const { email, password } = body
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+      
+      if (error) {
+        return handleCORS(NextResponse.json({ error: error.message }, { status: 400 }))
+      }
+      
+      return handleCORS(NextResponse.json({ user: data.user }))
+    }
+
+    if (path === 'auth/signout') {
+      const { error } = await supabase.auth.signOut()
+      
+      if (error) {
+        return handleCORS(NextResponse.json({ error: error.message }, { status: 400 }))
+      }
+      
+      return handleCORS(NextResponse.json({ message: 'Signed out successfully' }))
+    }
+
+    // Protected endpoints - require authentication
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (!user) {
+      return handleCORS(NextResponse.json({ error: "Unauthorized - Please log in" }, { status: 401 }))
+    }
+
+    // Join queue (customer)
+    if (path === 'bookings') {
+      const { shop_id, service } = body
+      
+      // Check if user already has an active booking at this shop
+      const { data: existingBooking } = await supabase
+        .from('bookings')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('shop_id', shop_id)
+        .eq('status', 'waiting')
+        .single()
+
+      if (existingBooking) {
+        return handleCORS(NextResponse.json({ 
+          error: 'You already have an active booking at this shop' 
+        }, { status: 400 }))
+      }
+
+      const booking = {
+        id: `booking_${Date.now()}_${user.id}`,
+        user_id: user.id,
+        shop_id,
+        service,
+        status: 'waiting',
+        joined_at: new Date().toISOString()
+      }
+
+      const { data, error } = await supabase
+        .from('bookings')
+        .insert([booking])
+        .select()
+        .single()
+
+      if (error) {
+        return handleCORS(NextResponse.json({ error: error.message }, { status: 500 }))
+      }
+
+      return handleCORS(NextResponse.json({ booking: data }))
+    }
+
+    // Update booking status (barber)
+    if (path.startsWith('bookings/') && path.includes('/status')) {
+      const bookingId = path.split('/')[1]
+      const { status } = body
+
+      const { data, error } = await supabase
+        .from('bookings')
+        .update({ 
+          status,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', bookingId)
+        .select()
+        .single()
+
+      if (error) {
+        return handleCORS(NextResponse.json({ error: error.message }, { status: 500 }))
+      }
+
+      return handleCORS(NextResponse.json({ booking: data }))
+    }
+
+    // Add review
+    if (path === 'reviews') {
+      const { shop_id, rating, review_text } = body
+      
+      const review = {
+        id: `review_${Date.now()}_${user.id}`,
+        shop_id,
+        user_id: user.id,
+        rating,
+        review_text: review_text || '',
+        created_at: new Date().toISOString()
+      }
+
+      const { data, error } = await supabase
+        .from('reviews')
+        .insert([review])
+        .select()
+        .single()
+
+      if (error) {
+        return handleCORS(NextResponse.json({ error: error.message }, { status: 500 }))
+      }
+
+      // Update shop's average rating
+      const { data: reviews } = await supabase
+        .from('reviews')
+        .select('rating')
+        .eq('shop_id', shop_id)
+
+      if (reviews && reviews.length > 0) {
+        const avgRating = reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
+        
+        await supabase
+          .from('barber_shops')
+          .update({ 
+            rating_avg: parseFloat(avgRating.toFixed(1)),
+            total_reviews: reviews.length
+          })
+          .eq('id', shop_id)
+      }
+
+      return handleCORS(NextResponse.json({ review: data }))
+    }
+
+    return handleCORS(NextResponse.json({ error: 'Endpoint not found' }, { status: 404 }))
+
+  } catch (error) {
+    console.error('API Error:', error)
+    return handleCORS(NextResponse.json({ 
+      error: 'Internal server error',
+      details: error.message 
+    }, { status: 500 }))
+  }
+}
+
+export async function PUT(request) {
+  try {
+    const supabase = createSupabaseServer()
+    const { pathname } = new URL(request.url)
+    const path = pathname.replace('/api/', '')
+    const body = await request.json()
+
+    // Protected endpoints - require authentication
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (!user) {
+      return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+    }
+
+    // Update barber shop details
+    if (path.startsWith('shops/')) {
+      const shopId = path.split('/')[1]
+      
+      // Verify ownership
+      const { data: shop } = await supabase
+        .from('barber_shops')
+        .select('user_id')
+        .eq('id', shopId)
+        .single()
+
+      if (!shop || shop.user_id !== user.id) {
+        return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 403 }))
+      }
+
+      const { data, error } = await supabase
+        .from('barber_shops')
+        .update({
+          ...body,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', shopId)
+        .select()
+        .single()
+
+      if (error) {
+        return handleCORS(NextResponse.json({ error: error.message }, { status: 500 }))
+      }
+
+      return handleCORS(NextResponse.json({ shop: data }))
+    }
+
+    return handleCORS(NextResponse.json({ error: 'Endpoint not found' }, { status: 404 }))
+
+  } catch (error) {
+    console.error('API Error:', error)
+    return handleCORS(NextResponse.json({ 
+      error: 'Internal server error',
+      details: error.message 
+    }, { status: 500 }))
+  }
+}
+
+export async function DELETE(request) {
+  try {
+    const supabase = createSupabaseServer()
+    const { pathname } = new URL(request.url)
+    const path = pathname.replace('/api/', '')
+
+    // Protected endpoints - require authentication
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (!user) {
+      return handleCORS(NextResponse.json({ error: "Unauthorized" }, { status: 401 }))
+    }
+
+    // Cancel booking
+    if (path.startsWith('bookings/')) {
+      const bookingId = path.split('/')[1]
+      
+      const { data, error } = await supabase
+        .from('bookings')
+        .update({ 
+          status: 'cancelled',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', bookingId)
+        .eq('user_id', user.id) // Ensure user owns the booking
+        .select()
+        .single()
+
+      if (error) {
+        return handleCORS(NextResponse.json({ error: error.message }, { status: 500 }))
+      }
+
+      return handleCORS(NextResponse.json({ booking: data }))
+    }
+
+    return handleCORS(NextResponse.json({ error: 'Endpoint not found' }, { status: 404 }))
+
+  } catch (error) {
+    console.error('API Error:', error)
+    return handleCORS(NextResponse.json({ 
+      error: 'Internal server error',
+      details: error.message 
+    }, { status: 500 }))
+  }
+}
