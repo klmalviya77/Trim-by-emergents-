@@ -215,7 +215,7 @@ class TrimTimeAPITester:
 
     def test_database_operations(self):
         """Test database operations and RLS policies"""
-        test_email = f"db_test_{uuid.uuid4().hex[:8]}@trimtime.test"
+        test_email = f"db.test.{uuid.uuid4().hex[:8]}@gmail.com"
         test_password = "TestPassword123!"
         
         try:
