@@ -58,8 +58,8 @@ class TrimTimeAPITester:
 
     def test_customer_registration(self):
         """Test customer registration flow"""
-        # Generate unique test data
-        test_email = f"customer_{uuid.uuid4().hex[:8]}@trimtime.test"
+        # Generate unique test data with valid email format
+        test_email = f"customer.{uuid.uuid4().hex[:8]}@gmail.com"
         test_password = "TestPassword123!"
         
         try:
