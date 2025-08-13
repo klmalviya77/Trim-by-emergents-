@@ -43,7 +43,7 @@ export async function GET(request) {
         .from('barber_shops')
         .select('*')
         .eq('verify', true)
-        .order('created_at', { ascending: false })
+        .order('createdAt', { ascending: false })
 
       if (error) {
         return handleCORS(NextResponse.json({ error: error.message }, { status: 500 }))
@@ -64,12 +64,12 @@ export async function GET(request) {
         .select(`
           *,
           barber_shops (
-            shop_name,
-            area_name
+            shopName,
+            areaName
           )
         `)
-        .eq('user_id', user.id)
-        .order('joined_at', { ascending: false })
+        .eq('userId', user.id)
+        .order('joinedAt', { ascending: false })
 
       if (error) {
         return handleCORS(NextResponse.json({ error: error.message }, { status: 500 }))
@@ -91,9 +91,9 @@ export async function GET(request) {
             email
           )
         `)
-        .eq('shop_id', shopId)
+        .eq('shopId', shopId)
         .eq('status', 'waiting')
-        .order('joined_at', { ascending: true })
+        .order('joinedAt', { ascending: true })
 
       if (error) {
         return handleCORS(NextResponse.json({ error: error.message }, { status: 500 }))
