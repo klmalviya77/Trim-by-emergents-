@@ -353,10 +353,10 @@ export async function DELETE(request) {
         .from('bookings')
         .update({ 
           status: 'cancelled',
-          updated_at: new Date().toISOString()
+          updatedAt: new Date().toISOString()
         })
         .eq('id', bookingId)
-        .eq('user_id', user.id) // Ensure user owns the booking
+        .eq('userId', user.id) // Ensure user owns the booking
         .select()
         .single()
 
