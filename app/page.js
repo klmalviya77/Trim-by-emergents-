@@ -86,11 +86,12 @@ export default function TrimTime() {
               email: email,
               name: name,
               role: selectedRole,
-              created_at: new Date().toISOString()
+              createdAt: new Date().toISOString()
             }])
           
           if (insertError) {
             console.error('Error inserting user data:', insertError)
+            throw insertError
           }
           
           // If barber, also insert into barber_shops table
@@ -99,21 +100,22 @@ export default function TrimTime() {
               .from('barber_shops')
               .insert([{
                 id: `shop_${data.user.id}`,
-                user_id: data.user.id,
-                shop_name: additionalData.shopName || '',
+                userId: data.user.id,
+                shopName: additionalData.shopName || '',
                 category: additionalData.category || '',
-                area_name: additionalData.areaName || '',
-                location_link: additionalData.locationLink || '',
-                services: JSON.stringify([]),
-                rating_avg: 0,
-                total_reviews: 0,
-                bookings_count: 0,
+                areaName: additionalData.areaName || '',
+                locationLink: additionalData.locationLink || '',
+                services: [],
+                ratingAvg: 0,
+                totalReviews: 0,
+                bookingsCount: 0,
                 verify: false,
-                created_at: new Date().toISOString()
+                createdAt: new Date().toISOString()
               }])
             
             if (barberError) {
               console.error('Error inserting barber shop data:', barberError)
+              throw barberError
             }
           }
         }
