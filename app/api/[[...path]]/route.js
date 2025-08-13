@@ -161,14 +161,14 @@ export async function POST(request) {
 
     // Join queue (customer)
     if (path === 'bookings') {
-      const { shop_id, service } = body
+      const { shopId, service } = body
       
       // Check if user already has an active booking at this shop
       const { data: existingBooking } = await supabase
         .from('bookings')
         .select('id')
-        .eq('user_id', user.id)
-        .eq('shop_id', shop_id)
+        .eq('userId', user.id)
+        .eq('shopId', shopId)
         .eq('status', 'waiting')
         .single()
 
@@ -180,11 +180,11 @@ export async function POST(request) {
 
       const booking = {
         id: `booking_${Date.now()}_${user.id}`,
-        user_id: user.id,
-        shop_id,
+        userId: user.id,
+        shopId,
         service,
         status: 'waiting',
-        joined_at: new Date().toISOString()
+        joinedAt: new Date().toISOString()
       }
 
       const { data, error } = await supabase
@@ -209,7 +209,7 @@ export async function POST(request) {
         .from('bookings')
         .update({ 
           status,
-          updated_at: new Date().toISOString()
+          updatedAt: new Date().toISOString()
         })
         .eq('id', bookingId)
         .select()
@@ -224,15 +224,15 @@ export async function POST(request) {
 
     // Add review
     if (path === 'reviews') {
-      const { shop_id, rating, review_text } = body
+      const { shopId, rating, reviewText } = body
       
       const review = {
         id: `review_${Date.now()}_${user.id}`,
-        shop_id,
-        user_id: user.id,
+        shopId,
+        userId: user.id,
         rating,
-        review_text: review_text || '',
-        created_at: new Date().toISOString()
+        reviewText: reviewText || '',
+        createdAt: new Date().toISOString()
       }
 
       const { data, error } = await supabase
@@ -249,7 +249,7 @@ export async function POST(request) {
       const { data: reviews } = await supabase
         .from('reviews')
         .select('rating')
-        .eq('shop_id', shop_id)
+        .eq('shopId', shopId)
 
       if (reviews && reviews.length > 0) {
         const avgRating = reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
@@ -257,10 +257,10 @@ export async function POST(request) {
         await supabase
           .from('barber_shops')
           .update({ 
-            rating_avg: parseFloat(avgRating.toFixed(1)),
-            total_reviews: reviews.length
+            ratingAvg: parseFloat(avgRating.toFixed(1)),
+            totalReviews: reviews.length
           })
-          .eq('id', shop_id)
+          .eq('id', shopId)
       }
 
       return handleCORS(NextResponse.json({ review: data }))
